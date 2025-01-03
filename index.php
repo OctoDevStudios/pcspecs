@@ -1,7 +1,15 @@
 <?php
 session_start();
+if (!is_readable('.env')) {
+    die('Unable to read .env file.');
+}
+$env = parse_ini_file('.env');
+if ($env === false) {
+    die('Error parsing .env file.');
+}
+$password = $env["password"];
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['password'])) {
-    if ($_POST['password'] !== 'METTRE MDP ICI') {
+    if ($_POST['password'] !== $password) {
         echo '<h1>Mot de passe incorrect !</h1>';
         exit;
     }
