@@ -1,11 +1,11 @@
 <?php
 session_start();
-if (!is_readable('.env')) {
-    die('Unable to read .env file.');
+if (!is_readable('pass.env')) {
+    die('Unable to read pass.env file.');
 }
-$env = parse_ini_file('.env');
+$env = parse_ini_file('pass.env');
 if ($env === false) {
-    die('Error parsing .env file.');
+    die('Error parsing pass.env file.');
 }
 $password = $env["password"];
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['password'])) {
