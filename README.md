@@ -1,32 +1,64 @@
-# PCspecs
-## Français
-### Qu'est ce que c'est ?
-PCspecs est un outil en `PHP`, `HTML` et `JS` pour sauvegarder dans un fichier json les specs d'un ou plusieurs PCs.
+# PC SPECS
 
-### Pourquoi est-ce utile ?
-PCspecs peut être utilisé pour conserver les specs d'un PC notamment pour la location ou juste pour se souvenir.
+[![PHP](https://img.shields.io/badge/php-7.2%2B-8892BF?style=flat-square)](https://www.php.net/) [![Status](https://img.shields.io/badge/status-experimental-orange?style=flat-square)](#) [![Maintained](https://img.shields.io/badge/maintained-yes-brightgreen?style=flat-square)](#)
 
-### ⚠️ INFORMATIONS DE SÉCURITÉ ⚠️
-PCspecs a une API en PHP. Cette API est facilement piratable. Avec une simple requête `DELETE`, on peut supprimer toutes les specs de tous les PCs. Je travaille encore sur le problème pour essayer de le régler avec un système de clé.
+Une petite application web (PHP + JavaScript) pour inventorier des machines et sauvegarder leurs spécifications dans `pcs.json`.
 
-### Comment l'installer ?
-- Télécharger tous les fichiers du repository. Ensuite, mettez les sur un serveur style `FTP`.
-- Mettre un mot de passe dans le fichier `.env`. 
+Principales caractéristiques
+- Interface web minimaliste pour lister/ajouter/modifier/supprimer des entrées
+- Authentification par mot de passe (session) et protection CSRF pour les opérations mutatives
+- Sauvegarde simple dans `pcs.json` (fichier JSON)
+- Paramètres configurables via l'interface (`settings.json`) : logs, tentatives de connexion, fichier de log
 
-#### MODIFICATIONS A VENIR.<br />
-## English
-### What is PCscpecs ?
-PCspecs is a tool written in `PHP`, `HTML` and `JS` to save in a JSON file the hardware specifications of one or many computers.
+Prérequis
+- PHP 7.2+ (PHP 7.4+ recommandé)
+- Navigateur moderne pour l'interface (Chrome / Firefox / Edge)
 
-### Why is-it useful ?
-PCspecs can be used to save hardware details of a computer for rent or just to remember.
+Installation & exécution locale
+1. Copier le dépôt dans un dossier accessible par PHP.
+2. Créer un fichier `pass.env` à la racine (exemple) :
 
-### ⚠️ SECURITY INFORMATIONS ⚠️
-PCspecs has a PHP API. This API is easily hackable : with a simple `DELETE` requests a hacker could delete all the datas. I am still working to fix this security issue with a token system.
+```
+password=ChangeMe
 
+```
 
-### Setup
-- Download the repository and put it on a `FTP` server or something in this kind.
-- Replace the placeholder with a real password in the `.env` file. 
+3. (Optionnel) Ajuster `settings.json` pour activer les logs ou la protection des tentatives de connexion.
 
-#### THIS PROJECT IS NOT COMPLETE. EDITS WILL COME.
+4. Lancer le serveur de développement PHP :
+
+```
+php -S 0.0.0.0:8000
+```
+
+5. Ouvrir `http://localhost:8000/index.php` et vous connecter.
+
+Configuration importante
+- `pass.env` : mot de passe ou `password_hash` pour utiliser `password_verify()`.
+- `settings.json` : options (voir interface Paramètres). Par défaut, les logs et la protection par tentatives sont désactivés.
+
+API (résumé)
+- `api.php` : point d'accès principal (GET pour lister, POST pour créer, PUT pour modifier, DELETE pour supprimer). Les requêtes mutatives attendent l'en‑tête `X-CSRF-Token` (token injecté dans la page HTML via une meta).
+- `settings.php` : lecture/écriture des paramètres (auth + CSRF requis).
+
+Fichiers importants
+- `index.php` : interface et point d'entrée
+- `api.php` : API CRUD
+- `settings.php` : gestion des paramètres
+- `pcs.json` : stockage des données
+- `pass.env` : mot de passe / hash
+- `settings.json` : paramètres persistants
+- `icons/` : images utilisées pour l'aperçu
+
+Sécurité & recommandations
+- Toujours servir via HTTPS en production.
+- Déplacer `pass.env`, `pcs.json` et `settings.json` hors du répertoire web si possible.
+- Utiliser `password_hash()` + `password_verify()` pour stocker le mot de passe.
+- Limiter l'accès réseau au serveur si l'application est exposée publiquement.
+
+Dépannage rapide
+- API 401 : reconnectez-vous (session expirée) et vérifiez la présence de la meta `csrf-token` dans le HTML.
+
+Limitations
+- Stockage fichier (pas de base de données) → pas conçu pour une forte concurrence.
+- Pas de chiffrement des backups intégrés.

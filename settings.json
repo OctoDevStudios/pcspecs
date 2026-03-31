@@ -1,0 +1,12 @@
+{
+  "enable_logs": false,
+  "log_writes": false,
+  "log_deletes": false,
+  "log_modifications": false,
+  "log_auth": false,
+  "enable_login_attempts": false,
+  "login_attempts_count": 5,
+  "lockout_seconds": 300,
+  "rate_limit_ms": 250,
+  "log_file": "logs/pcspecs.log"
+}
