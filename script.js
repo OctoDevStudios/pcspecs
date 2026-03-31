@@ -19,48 +19,113 @@ const storageDetected = document.getElementById('storage-detected');
 const osDetected = document.getElementById('os-detected');
 const brandDetected = document.getElementById('brand-detected');
 
+const notifications = document.getElementById('notifications');
+const confirmModal = document.getElementById('confirm-modal');
+const loadingOverlay = document.getElementById('loading-overlay');
 const CSRF = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+
+// DetectAI instance (provided by detectai.js)
+const detectAI = typeof DetectAI !== 'undefined' ? new DetectAI() : null;
 
 let pcs = [];
 let editIndex = null;
 
 async function loadPCs() {
+  showLoading(true);
   try {
     const res = await fetch('api.php', { credentials: 'same-origin' });
     if (!res.ok) {
       if (res.status === 401) {
-        alert('Non authentifié. Veuillez vous reconnecter.');
+        showNotification('Non authentifié. Veuillez vous reconnecter.', 'error');
         window.location = 'index.php';
         return;
       }
       throw new Error('Erreur réseau');
     }
     pcs = await res.json();
+    // auto-correct existing entries (client-side) and persist corrected values
+    if (detectAI) await standardizeAndPersist(pcs);
     renderTable(pcs);
   } catch (err) {
     console.error(err);
-    alert('Impossible de charger les données.');
+    showNotification('Impossible de charger les données.', 'error');
+  } finally {
+    showLoading(false);
+  }
+}
+
+// Standardize entries using DetectAI and persist corrections back to the server.
+async function standardizeAndPersist(list) {
+  if (!Array.isArray(list) || list.length === 0) return;
+  if (!detectAI) return;
+  for (let i = 0; i < list.length; i++) {
+    const pc = list[i] || {};
+    const corrected = Object.assign({}, pc);
+    try {
+      corrected.cpu = (detectAI.correctCPU(pc.cpu) || pc.cpu || '').trim();
+      corrected.gpu = (detectAI.correctGPU(pc.gpu) || pc.gpu || '').trim();
+      corrected.storage = (detectAI.correctStorage(pc.storage) || pc.storage || '').trim();
+      corrected.os = (detectAI.correctOS(pc.os) || pc.os || '').trim();
+      corrected.brand = (detectAI.correctBrandModel(pc.brand) || pc.brand || '').trim();
+    } catch (e) {
+      console.error('DetectAI correction failed for index', i, e);
+      continue;
+    }
+    // If nothing changed, skip
+    const changed = ['cpu','gpu','storage','os','brand'].some(k => String(pc[k] || '').trim() !== String(corrected[k] || '').trim());
+    if (!changed) continue;
+    // update local list for immediate UI feedback
+    list[i] = corrected;
+    try {
+      // throttle to avoid server rate limits
+      await new Promise(r => setTimeout(r, 300));
+      const opts = {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': CSRF,
+          'X-Requested-With': 'XMLHttpRequest'
+        },
+        credentials: 'same-origin',
+        body: JSON.stringify(corrected)
+      };
+      const res = await fetch(`api.php?index=${i}`, opts);
+      if (!res.ok) {
+        console.warn('Failed to persist corrected PC at index', i, await res.text());
+      } else {
+        await res.json();
+        showNotification('Correction appliquée pour l\'élément #' + (i + 1), 'success', 2000);
+      }
+    } catch (e) {
+      console.error('Error persisting correction for index', i, e);
+    }
   }
 }
 
 function renderTable(list) {
   tableBody.innerHTML = '';
+  if (!Array.isArray(list) || list.length === 0) {
+    tableBody.innerHTML = '<tr><td colspan="7" class="muted">Aucun PC</td></tr>';
+    return;
+  }
   const pairs = list.map((pc, i) => ({ pc, i }));
+  // compute search tokens for highlighting
+  const q = (searchInput?.value || '').trim();
+  const tokens = q ? (q.match(/\S+/g) || []) : [];
   pairs.forEach(({ pc, i }, displayIndex) => {
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td>${displayIndex + 1}</td>
-      <td><img src="icons/${getCPUImage(pc.cpu)}" alt="${pc.cpu}">${escapeHtml(pc.cpu)}</td>
-      <td><img src="icons/${getGPUImage(pc.gpu)}" alt="${pc.gpu}">${escapeHtml(pc.gpu)}</td>
-      <td><img src="icons/${getStorageImage(pc.storage)}" alt="${pc.storage}">${escapeHtml(pc.storage)}</td>
-      <td><img src="icons/${getOSImage(pc.os)}" alt="${pc.os}">${escapeHtml(pc.os)}</td>
-      <td><img src="icons/${getBrandImage(pc.brand)}" alt="${pc.brand}">${escapeHtml(pc.brand)}</td>
+      <td><img src="icons/${getCPUImage(pc.cpu)}" alt="${pc.cpu}">${highlight(pc.cpu, tokens)}</td>
+      <td><img src="icons/${getGPUImage(pc.gpu)}" alt="${pc.gpu}">${highlight(pc.gpu, tokens)}</td>
+      <td><img src="icons/${getStorageImage(pc.storage)}" alt="${pc.storage}">${highlight(pc.storage, tokens)}</td>
+      <td><img src="icons/${getOSImage(pc.os)}" alt="${pc.os}">${highlight(pc.os, tokens)}</td>
+      <td><img src="icons/${getBrandImage(pc.brand)}" alt="${pc.brand}">${highlight(pc.brand, tokens)}</td>
       <td class="actions">
         <button class="btn btn-small btn-edit" data-index="${i}">Modifier</button>
         <button class="btn btn-small btn-danger btn-delete" data-index="${i}">Supprimer</button>
       </td>
     `;
-    // animate entry
     tr.classList.add('enter');
     tableBody.appendChild(tr);
     tr.addEventListener('animationend', () => tr.classList.remove('enter'));
@@ -72,6 +137,23 @@ function escapeHtml(s) {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
+}
+
+function escapeRegex(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function highlight(text, tokens) {
+  let t = escapeHtml(text || '');
+  if (!tokens || !tokens.length) return t;
+  tokens.forEach((tok) => {
+    if (!tok) return;
+    try {
+      const re = new RegExp('(' + escapeRegex(tok) + ')', 'ig');
+      t = t.replace(re, '<mark>$1</mark>');
+    } catch (e) { /* ignore bad regex */ }
+  });
+  return t;
 }
 
 btnCreate.addEventListener('click', () => {
@@ -95,11 +177,23 @@ modalSave.addEventListener('click', async (e) => {
   const pc = {};
   ['cpu', 'gpu', 'storage', 'os', 'brand'].forEach((k) => (pc[k] = (formData.get(k) || '').trim()));
   if (!pc.cpu) {
-    alert('Le champ CPU est requis');
+    showNotification('Le champ CPU est requis', 'error');
     return;
   }
+  // Apply DetectAI corrections before sending
+  if (detectAI) {
+    try {
+      pc.cpu = (detectAI.correctCPU(pc.cpu) || pc.cpu).trim();
+      pc.gpu = (detectAI.correctGPU(pc.gpu) || pc.gpu).trim();
+      pc.storage = (detectAI.correctStorage(pc.storage) || pc.storage).trim();
+      pc.os = (detectAI.correctOS(pc.os) || pc.os).trim();
+      pc.brand = (detectAI.correctBrandModel(pc.brand) || pc.brand).trim();
+    } catch (e) {
+      console.error('DetectAI correction error', e);
+    }
+  }
   if (!CSRF) {
-    alert('Jeton CSRF manquant. Rechargez la page.');
+    showNotification('Jeton CSRF manquant. Rechargez la page.', 'error');
     return;
   }
   try {
@@ -117,7 +211,7 @@ modalSave.addEventListener('click', async (e) => {
     const res = await fetch(url, opts);
     if (!res.ok) {
       if (res.status === 401) {
-        alert('Non authentifié');
+        showNotification('Non authentifié', 'error');
         window.location = 'index.php';
         return;
       }
@@ -129,7 +223,7 @@ modalSave.addEventListener('click', async (e) => {
     loadPCs();
   } catch (err) {
     console.error(err);
-    alert("Erreur lors de l'enregistrement");
+    showNotification("Erreur lors de l'enregistrement", 'error');
   }
 });
 
@@ -150,12 +244,13 @@ tableBody.addEventListener('click', (e) => {
     showModal();
   } else if (target.matches('.btn-delete')) {
     const idx = parseInt(target.dataset.index, 10);
-    if (confirm('Supprimer cet élément ?')) {
+    showConfirm('Supprimer cet élément ?').then((ok) => {
+      if (!ok) return;
       fetch(`api.php?index=${idx}`, { method: 'DELETE', credentials: 'same-origin', headers: { 'X-CSRF-Token': CSRF, 'X-Requested-With': 'XMLHttpRequest' } })
         .then(async (res) => {
           if (!res.ok) {
             if (res.status === 401) {
-              alert('Non authentifié');
+              showNotification('Non authentifié', 'error');
               window.location = 'index.php';
               return;
             }
@@ -166,9 +261,9 @@ tableBody.addEventListener('click', (e) => {
         })
         .catch((err) => {
           console.error(err);
-          alert('Erreur lors de la suppression');
+          showNotification('Erreur lors de la suppression', 'error');
         });
-    }
+    });
   }
 });
 
@@ -195,6 +290,55 @@ function animatePreview(el) {
   void el.offsetWidth;
   el.classList.add('pop');
   setTimeout(() => el.classList.remove('pop'), 300);
+}
+
+// Notifications
+function showNotification(msg, type = 'info', timeout = 4000) {
+  if (!notifications) return alert(msg);
+  const n = document.createElement('div');
+  n.className = 'notification ' + (type || 'info');
+  n.innerHTML = msg;
+  notifications.appendChild(n);
+  setTimeout(() => {
+    n.style.transition = 'opacity 240ms ease, transform 240ms ease';
+    n.style.opacity = '0';
+    n.style.transform = 'translateY(8px)';
+    setTimeout(() => n.remove(), 300);
+  }, timeout);
+}
+
+function showConfirm(message) {
+  return new Promise((resolve) => {
+    if (!confirmModal) return resolve(confirm(message));
+    const msgEl = confirmModal.querySelector('.confirm-message');
+    const yes = confirmModal.querySelector('.confirm-yes');
+    const no = confirmModal.querySelector('.confirm-no');
+    msgEl.textContent = message;
+    confirmModal.classList.add('open');
+    confirmModal.setAttribute('aria-hidden', 'false');
+    function cleanup(val) {
+      confirmModal.classList.remove('open');
+      confirmModal.setAttribute('aria-hidden', 'true');
+      yes.removeEventListener('click', onYes);
+      no.removeEventListener('click', onNo);
+      resolve(val);
+    }
+    function onYes(e) { e.preventDefault(); cleanup(true); }
+    function onNo(e) { e.preventDefault(); cleanup(false); }
+    yes.addEventListener('click', onYes);
+    no.addEventListener('click', onNo);
+  });
+}
+
+function showLoading(on = true) {
+  if (!loadingOverlay) return;
+  if (on) {
+    loadingOverlay.classList.add('open');
+    loadingOverlay.hidden = false;
+  } else {
+    loadingOverlay.classList.remove('open');
+    loadingOverlay.hidden = true;
+  }
 }
 
 // Settings UI elements
@@ -241,13 +385,20 @@ document.addEventListener('click', async (e) => {
       if (lac) lac.value = parseInt(s.login_attempts_count || 5, 10);
       const ls = settingsForm.querySelector('[name=lockout_seconds]');
       if (ls) ls.value = parseInt(s.lockout_seconds || 300, 10);
+      // IP block fields
+      const ipb = settingsForm.querySelector('[name=ip_block_enabled]');
+      if (ipb) ipb.checked = !!s.ip_block_enabled;
+      const ipt = settingsForm.querySelector('[name=ip_block_threshold]');
+      if (ipt) ipt.value = parseInt(s.ip_block_threshold || 20, 10);
+      const ipd = settingsForm.querySelector('[name=ip_block_seconds]');
+      if (ipd) ipd.value = parseInt(s.ip_block_seconds || 3600, 10);
       // apply dependencies (disable/grayout dependent controls)
       applySettingsDependencies();
     }
     showSettingsModal();
   } catch (err) {
     console.error(err);
-    alert('Erreur en chargeant les paramètres');
+    showNotification('Erreur en chargeant les paramètres', 'error');
   }
 });
 
@@ -267,6 +418,10 @@ if (settingsSave) {
       enable_login_attempts: !!settingsForm.querySelector('[name=enable_login_attempts]').checked,
       login_attempts_count: parseInt(settingsForm.querySelector('[name=login_attempts_count]').value || 5, 10),
       lockout_seconds: parseInt(settingsForm.querySelector('[name=lockout_seconds]').value || 300, 10),
+      // IP block
+      ip_block_enabled: !!settingsForm.querySelector('[name=ip_block_enabled]').checked,
+      ip_block_threshold: parseInt(settingsForm.querySelector('[name=ip_block_threshold]').value || 20, 10),
+      ip_block_seconds: parseInt(settingsForm.querySelector('[name=ip_block_seconds]').value || 3600, 10),
       log_file: settingsForm.querySelector('[name=log_file]').value || 'logs/pcspecs.log'
     };
     try {
@@ -286,10 +441,10 @@ if (settingsSave) {
       }
       await res.json();
       hideSettingsModal();
-      alert('Paramètres enregistrés');
+      showNotification('Paramètres enregistrés', 'success');
     } catch (err) {
       console.error(err);
-      alert("Erreur lors de l'enregistrement des paramètres");
+      showNotification("Erreur lors de l'enregistrement des paramètres", 'error');
     }
   });
 }
@@ -297,7 +452,7 @@ if (settingsSave) {
 // Settings dependency helpers: disable inputs that depend on master toggles
 function applySettingsDependencies() {
   if (!settingsForm) return;
-  const masters = Array.from(settingsForm.querySelectorAll('[name=enable_logs],[name=enable_login_attempts]'));
+  const masters = Array.from(settingsForm.querySelectorAll('[name=enable_logs],[name=enable_login_attempts],[name=ip_block_enabled]'));
   masters.forEach((m) => {
     const name = m.getAttribute('name');
     const checked = !!m.checked;
@@ -319,6 +474,8 @@ if (settingsForm) {
   const toggleLogin = settingsForm.querySelector('[name=enable_login_attempts]');
   if (toggleLogs) toggleLogs.addEventListener('change', applySettingsDependencies);
   if (toggleLogin) toggleLogin.addEventListener('change', applySettingsDependencies);
+  const toggleIPBlock = settingsForm.querySelector('[name=ip_block_enabled]');
+  if (toggleIPBlock) toggleIPBlock.addEventListener('change', applySettingsDependencies);
 }
 
 function updatePreviewsFromForm() {
@@ -396,6 +553,7 @@ searchInput.addEventListener('input', () => {
 
 // improved detection helpers
 function detectCPU(s) {
+  if (detectAI) return detectAI.detectCPU(s);
   if (!s) return '';
   const su = s.toUpperCase();
   // detect i3/i5/i7/i9
@@ -410,6 +568,7 @@ function detectCPU(s) {
 }
 
 function detectGPU(s) {
+  if (detectAI) return detectAI.detectGPU(s);
   if (!s) return '';
   const n = s.toLowerCase();
   const rtx = n.match(/rtx\s*\d{3,4}/i);
@@ -425,6 +584,7 @@ function detectGPU(s) {
 }
 
 function detectStorage(s) {
+  if (detectAI) return detectAI.detectStorage(s);
   if (!s) return '';
   const su = s.toUpperCase();
   if (/HDD/i.test(su)) return 'HDD';
@@ -433,6 +593,7 @@ function detectStorage(s) {
 }
 
 function detectOS(s) {
+  if (detectAI) return detectAI.detectOS(s);
   if (!s) return '';
   const n = s.toLowerCase();
   if (/(windows\s*11|win\s*11|^11\b)/i.test(n)) return 'Windows 11';
@@ -453,21 +614,24 @@ function normalize(s) {
 }
 
 function detectBrand(s) {
+  if (detectAI) return detectAI.detectBrand(s);
   if (!s) return '';
   const n = normalize(s);
-  const brands = ['dell','asus','msi','gigabyte','samsung','lenovo','hp','acer','toshiba','apple'];
+  const brands = ['dell','asus','msi','gigabyte','samsung','lenovo','hp','acer','toshiba','apple','microsoft'];
   for (const b of brands) if (n.includes(b)) return b.charAt(0).toUpperCase() + b.slice(1);
   return '';
 }
 
 // helpers for icons (kept similar logic to original)
 function getCPUImage(cpu) {
+  if (detectAI) return detectAI.getCPUImage(cpu);
   if (!cpu) return 'none.png';
   const s = cpu.toUpperCase();
   return (s.includes('I3') ? 'i3' : s.includes('I5') ? 'i5' : s.includes('I7') ? 'i7' : s.includes('I9') ? 'i9' : s.includes('INTEL') ? 'intel' : s.includes('AMD') ? 'amd' : 'none') + '.png';
 }
 
 function getGPUImage(gpu) {
+  if (detectAI) return detectAI.getGPUImage(gpu);
   if (!gpu) return 'none.png';
   const n = (gpu || '').toLowerCase();
   if (/(geforce|rtx|gtx|nvidia)/i.test(n)) return 'nvidia.png';
@@ -477,12 +641,14 @@ function getGPUImage(gpu) {
 }
 
 function getStorageImage(storage) {
+  if (detectAI) return detectAI.getStorageImage(storage);
   if (!storage) return 'none.png';
   const s = storage.toUpperCase();
   return (s.includes('HDD') ? 'hdd' : 'ssd') + '.png';
 }
 
 function getOSImage(os) {
+  if (detectAI) return detectAI.getOSImage(os);
   if (!os) return 'none.png';
   const n = (os || '').toLowerCase();
   if (/(windows\s*11|win\s*11|^11\b)/i.test(n)) return 'win11.png';
@@ -501,9 +667,10 @@ function getOSImage(os) {
 }
 
 function getBrandImage(brand) {
+  if (detectAI) return detectAI.getBrandImage(brand);
   if (!brand) return 'none.png';
   const n = normalize(brand);
-  const map = { dell:'dell', asus:'asus', msi:'msi', gigabyte:'gigabyte', samsung:'samsung', lenovo:'lenovo', hp:'hp', acer:'acer', toshiba:'toshiba', apple:'apple' };
+  const map = { dell:'dell', asus:'asus', msi:'msi', gigabyte:'gigabyte', samsung:'samsung', lenovo:'lenovo', hp:'hp', acer:'acer', toshiba:'toshiba', apple:'apple', microsoft:'microsoft' };
   for (const k in map) if (n.includes(k)) return map[k] + '.png';
   return 'none.png';
 }

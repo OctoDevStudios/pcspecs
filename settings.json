@@ -7,6 +7,9 @@
   "enable_login_attempts": false,
   "login_attempts_count": 5,
   "lockout_seconds": 300,
+  "ip_block_enabled": false,
+  "ip_block_threshold": 20,
+  "ip_block_seconds": 3600,
   "rate_limit_ms": 250,
   "log_file": "logs/pcspecs.log"
 }

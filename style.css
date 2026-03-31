@@ -134,3 +134,17 @@ img{width:36px;height:auto;vertical-align:middle;margin-right:8px}
   .brand h1{font-size:16px}
   .auth-card{min-width:260px}
 }
+
+/* Notifications */
+.notifications{position:fixed;right:18px;bottom:18px;display:flex;flex-direction:column;gap:8px;z-index:100000;max-width:340px}
+.notification{padding:10px 14px;border-radius:10px;color:#fff;box-shadow:0 8px 30px rgba(2,6,23,0.6);opacity:1;transform:none}
+.notification.info{background:#2563eb}
+.notification.success{background:#16a34a}
+.notification.error{background:#ef4444}
+
+/* Loading overlay */
+.loading-overlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(2,6,23,0.6);z-index:99998}
+.loading-overlay.open{display:flex}
+.loading-overlay[hidden]{display:none}
+.spinner{width:42px;height:42px;border-radius:50%;border:4px solid rgba(255,255,255,0.12);border-top-color:#fff;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}

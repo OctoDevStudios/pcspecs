@@ -12,12 +12,48 @@ $defaults = [
   'login_attempts_count' => 5,
   'lockout_seconds' => 300,
   'rate_limit_ms' => 250,
-  'log_file' => 'logs/pcspecs.log'
+  'log_file' => 'logs/pcspecs.log',
+  // IP blocking (optional)
+  'ip_block_enabled' => false,
+  'ip_block_threshold' => 20,
+  'ip_block_seconds' => 3600,
 ];
 $settings = $defaults;
 if (file_exists($settingsFile)) {
   $s = json_decode(@file_get_contents($settingsFile), true);
   if (is_array($s)) $settings = array_merge($defaults, $s);
+}
+
+// files for IP tracking
+$ipAttemptsFile = 'logs/ip_attempts.json';
+$blockedIpsFile = 'logs/blocked_ips.json';
+
+// helper: read/write JSON with basic safety
+function read_json_file($file) {
+  if (!file_exists($file)) return [];
+  $c = @file_get_contents($file);
+  if ($c === false) return [];
+  $d = json_decode($c, true);
+  return is_array($d) ? $d : [];
+}
+
+function write_json_file_atomic($file, $data) {
+  $dir = dirname($file);
+  if (!is_dir($dir)) @mkdir($dir, 0750, true);
+  $tmp = tempnam($dir, 'tmp');
+  if ($tmp === false) return false;
+  $json = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+  if (@file_put_contents($tmp, $json) === false) { @unlink($tmp); return false; }
+  if (!@rename($tmp, $file)) { @unlink($tmp); return false; }
+  return true;
+}
+
+function get_client_ip() {
+  if (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+    $parts = explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']);
+    return trim($parts[0]);
+  }
+  return $_SERVER['REMOTE_ADDR'] ?? '';
 }
 
 // load password values from pass.env or env vars
@@ -49,11 +85,20 @@ $maxAttempts = $login_attempts_enabled ? intval($settings['login_attempts_count'
 $lockoutSeconds = $login_attempts_enabled ? intval($settings['lockout_seconds'] ?? 300) : 0;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['password'])) {
-  // if lockout active (only applies if login attempts enabled)
-  if ($login_attempts_enabled && !empty($_SESSION['login_locked_until']) && time() < $_SESSION['login_locked_until']) {
-    $wait = $_SESSION['login_locked_until'] - time();
-    $login_error = 'Trop de tentatives. Réessayez dans ' . intval($wait) . ' secondes.';
-  } else {
+  $ip = get_client_ip();
+
+  // if IP blocked (only when login attempts and IP block enabled)
+  if ($login_attempts_enabled && !empty($settings['ip_block_enabled'])) {
+    $blocked = read_json_file($blockedIpsFile);
+    $blockUntil = isset($blocked[$ip]) ? intval($blocked[$ip]) : 0;
+    if ($blockUntil && time() < $blockUntil) {
+      $wait = $blockUntil - time();
+      $login_error = 'Trop de tentatives depuis votre IP. Réessayez dans ' . intval($wait) . ' secondes.';
+    }
+  }
+
+  // proceed only if IP not currently blocked
+  if (empty($login_error)) {
     $entered = (string)($_POST['password'] ?? '');
     $ok = false;
     if (!empty($password_hash)) {
@@ -69,6 +114,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['password'])) {
       session_regenerate_id(true);
       $_SESSION['authenticated'] = true;
       $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+
+      // reset IP attempts/block for this IP
+      if (!empty($settings['ip_block_enabled'])) {
+        $ipAttempts = read_json_file($ipAttemptsFile);
+        if (isset($ipAttempts[$ip])) {
+          unset($ipAttempts[$ip]);
+          write_json_file_atomic($ipAttemptsFile, $ipAttempts);
+        }
+        $blocked = read_json_file($blockedIpsFile);
+        if (isset($blocked[$ip])) {
+          unset($blocked[$ip]);
+          write_json_file_atomic($blockedIpsFile, $blocked);
+        }
+      }
+
       // log auth success if enabled
       if (!empty($settings['enable_logs']) && !empty($settings['log_auth'])) {
         $logFile = $settings['log_file'] ?? 'logs/pcspecs.log';
@@ -92,6 +152,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['password'])) {
         // attempts not enabled: simple message, no lockout
         $login_error = 'Mot de passe incorrect !';
       }
+
+      // IP-based tracking + blocking
+      if ($login_attempts_enabled && !empty($settings['ip_block_enabled'])) {
+        $ipAttempts = read_json_file($ipAttemptsFile);
+        $rec = $ipAttempts[$ip] ?? ['count' => 0, 'last' => 0];
+        $rec['count'] = intval($rec['count'] ?? 0) + 1;
+        $rec['last'] = time();
+        $ipAttempts[$ip] = $rec;
+        write_json_file_atomic($ipAttemptsFile, $ipAttempts);
+        $threshold = intval($settings['ip_block_threshold'] ?? 20);
+        if ($rec['count'] >= $threshold) {
+          $blocked = read_json_file($blockedIpsFile);
+          $blocked[$ip] = time() + intval($settings['ip_block_seconds'] ?? 3600);
+          write_json_file_atomic($blockedIpsFile, $blocked);
+          // reset attempts for ip
+          unset($ipAttempts[$ip]);
+          write_json_file_atomic($ipAttemptsFile, $ipAttempts);
+          $login_error = 'Trop de tentatives. Votre IP a été bloquée temporairement.';
+          if (!empty($settings['enable_logs']) && !empty($settings['log_auth'])) {
+            $logFile = $settings['log_file'] ?? 'logs/pcspecs.log';
+            $entry = json_encode(['time' => gmdate('c'), 'ip' => $ip, 'event' => 'ip_blocked', 'threshold' => $threshold]);
+            @mkdir(dirname($logFile), 0750, true);
+            @file_put_contents($logFile, $entry.PHP_EOL, FILE_APPEND | LOCK_EX);
+          }
+        }
+      }
+
       if (!empty($settings['enable_logs']) && !empty($settings['log_auth'])) {
         $logFile = $settings['log_file'] ?? 'logs/pcspecs.log';
         $entry = json_encode(['time' => gmdate('c'), 'ip' => $_SERVER['REMOTE_ADDR'] ?? '', 'event' => 'login_failed', 'attempts' => $_SESSION['login_attempts']]);
@@ -268,6 +355,15 @@ endif;
           <label class="row">Durée du verrouillage (secondes)
             <input type="number" name="lockout_seconds" min="0" max="86400" step="1" data-depends="enable_login_attempts" />
           </label>
+          <label class="row">Activer le blocage IP
+            <input type="checkbox" name="ip_block_enabled" data-depends="enable_login_attempts" />
+          </label>
+          <label class="row">Tentatives IP avant blocage
+            <input type="number" name="ip_block_threshold" min="1" max="100000" step="1" data-depends="ip_block_enabled" />
+          </label>
+          <label class="row">Durée du blocage IP (secondes)
+            <input type="number" name="ip_block_seconds" min="0" max="86400" step="1" data-depends="ip_block_enabled" />
+          </label>
         </section>
       </form>
       <div class="modal-actions">
@@ -277,6 +373,26 @@ endif;
     </div>
   </div>
 
+  <!-- Notifications container -->
+  <div id="notifications" class="notifications" aria-live="polite"></div>
+
+  <!-- Confirmation modal (simple) -->
+  <div class="modal" id="confirm-modal" aria-hidden="true">
+    <div class="modal-content" role="dialog" aria-modal="true">
+      <p class="confirm-message">Confirmer ?</p>
+      <div class="modal-actions" style="justify-content:flex-start;">
+        <button class="btn confirm-no">Non</button>
+        <button class="btn btn-primary confirm-yes">Oui</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Loading overlay -->
+  <div id="loading-overlay" class="loading-overlay" hidden>
+    <div class="spinner"></div>
+  </div>
+
+  <script src="detectai.js"></script>
   <script src="script.js"></script>
 </body>
 </html>

@@ -19,6 +19,9 @@ $defaults = [
     'enable_login_attempts' => false,
     'login_attempts_count' => 5,
     'lockout_seconds' => 300,
+    'ip_block_enabled' => false,
+    'ip_block_threshold' => 20,
+    'ip_block_seconds' => 3600,
     'rate_limit_ms' => 250,
     'log_file' => 'logs/pcspecs.log'
 ];
@@ -78,6 +81,16 @@ if ($method === 'POST') {
     if ($ls < 0) $ls = 0;
     if ($ls > 86400) $ls = 86400;
     $s['lockout_seconds'] = $ls;
+    // IP block settings
+    $s['ip_block_enabled'] = !empty($payload['ip_block_enabled']);
+    $ibt = intval($payload['ip_block_threshold'] ?? $s['ip_block_threshold']);
+    if ($ibt < 1) $ibt = 1;
+    if ($ibt > 100000) $ibt = 100000;
+    $s['ip_block_threshold'] = $ibt;
+    $ibs = intval($payload['ip_block_seconds'] ?? $s['ip_block_seconds']);
+    if ($ibs < 0) $ibs = 0;
+    if ($ibs > 86400) $ibs = 86400;
+    $s['ip_block_seconds'] = $ibs;
     // rate limit (write throttling)
     $rl = intval($payload['rate_limit_ms'] ?? $s['rate_limit_ms']);
     if ($rl < 50) $rl = 50;
