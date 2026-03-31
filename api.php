@@ -128,6 +128,7 @@ switch ($method) {
             'cpu' => sanitize($newPC['cpu'], 128),
             'gpu' => sanitize($newPC['gpu'] ?? '', 128),
             'storage' => sanitize($newPC['storage'] ?? '', 64),
+            'ram' => sanitize($newPC['ram'] ?? '', 64),
             'os' => sanitize($newPC['os'] ?? '', 64),
             'brand' => sanitize($newPC['brand'] ?? '', 128),
         ];
@@ -199,6 +200,7 @@ switch ($method) {
             'cpu' => sanitize($updatedPC['cpu'], 128),
             'gpu' => sanitize($updatedPC['gpu'] ?? '', 128),
             'storage' => sanitize($updatedPC['storage'] ?? '', 64),
+            'ram' => sanitize($updatedPC['ram'] ?? '', 64),
             'os' => sanitize($updatedPC['os'] ?? '', 64),
             'brand' => sanitize($updatedPC['brand'] ?? '', 128),
         ];

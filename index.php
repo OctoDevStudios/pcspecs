@@ -254,6 +254,7 @@ endif;
               <th>CPU</th>
               <th>GPU</th>
               <th>STORAGE</th>
+              <th>RAM</th>
               <th>OS</th>
               <th>BRAND</th>
               <th>Actions</th>
@@ -291,6 +292,14 @@ endif;
             <input type="text" name="storage" />
             <img id="storage-preview" src="icons/none.png" alt="">
             <span class="field-detected" id="storage-detected"></span>
+          </div>
+        </div>
+        <div class="field">
+          <span class="field-label">RAM</span>
+          <div class="field-row">
+            <input type="text" name="ram" />
+            <img id="ram-preview" src="icons/none.png" alt="">
+            <span class="field-detected" id="ram-detected"></span>
           </div>
         </div>
         <div class="field">
@@ -383,6 +392,19 @@ endif;
       <div class="modal-actions" style="justify-content:flex-start;">
         <button class="btn confirm-no">Non</button>
         <button class="btn btn-primary confirm-yes">Oui</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Correction modal: show suggested corrections before persisting -->
+  <div class="modal" id="correction-modal" aria-hidden="true">
+    <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="correction-title">
+      <h2 id="correction-title">Corrections proposées</h2>
+      <div id="correction-list" style="max-height:260px;overflow:auto;margin:8px 0;padding-right:8px;"></div>
+      <div class="modal-actions">
+        <button id="correction-edit" class="btn">Me corriger</button>
+        <button id="correction-keep" class="btn">Garder l'original</button>
+        <button id="correction-apply" class="btn btn-primary">Appliquer corrections</button>
       </div>
     </div>
   </div>

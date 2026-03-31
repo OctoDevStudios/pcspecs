@@ -12,12 +12,14 @@ const gpuPreview = document.getElementById('gpu-preview');
 const storagePreview = document.getElementById('storage-preview');
 const osPreview = document.getElementById('os-preview');
 const brandPreview = document.getElementById('brand-preview');
+const ramPreview = document.getElementById('ram-preview');
 
 const cpuDetected = document.getElementById('cpu-detected');
 const gpuDetected = document.getElementById('gpu-detected');
 const storageDetected = document.getElementById('storage-detected');
 const osDetected = document.getElementById('os-detected');
 const brandDetected = document.getElementById('brand-detected');
+const ramDetected = document.getElementById('ram-detected');
 
 const notifications = document.getElementById('notifications');
 const confirmModal = document.getElementById('confirm-modal');
@@ -29,6 +31,17 @@ const detectAI = typeof DetectAI !== 'undefined' ? new DetectAI() : null;
 
 let pcs = [];
 let editIndex = null;
+// Correction modal elements (added to DOM in index.php)
+const correctionModal = document.getElementById('correction-modal');
+const correctionList = document.getElementById('correction-list');
+const correctionApply = document.getElementById('correction-apply');
+const correctionKeep = document.getElementById('correction-keep');
+const correctionEdit = document.getElementById('correction-edit');
+
+// Pending state for user confirmation
+let pendingOriginalPC = null;
+let pendingSuggestedPC = null;
+let pendingEditIndex = null;
 
 async function loadPCs() {
   showLoading(true);
@@ -65,6 +78,7 @@ async function standardizeAndPersist(list) {
       corrected.cpu = (detectAI.correctCPU(pc.cpu) || pc.cpu || '').trim();
       corrected.gpu = (detectAI.correctGPU(pc.gpu) || pc.gpu || '').trim();
       corrected.storage = (detectAI.correctStorage(pc.storage) || pc.storage || '').trim();
+      corrected.ram = (detectAI.correctRAM ? (detectAI.correctRAM(pc.ram) || pc.ram || '').trim() : (pc.ram || '').trim());
       corrected.os = (detectAI.correctOS(pc.os) || pc.os || '').trim();
       corrected.brand = (detectAI.correctBrandModel(pc.brand) || pc.brand || '').trim();
     } catch (e) {
@@ -72,7 +86,7 @@ async function standardizeAndPersist(list) {
       continue;
     }
     // If nothing changed, skip
-    const changed = ['cpu','gpu','storage','os','brand'].some(k => String(pc[k] || '').trim() !== String(corrected[k] || '').trim());
+    const changed = ['cpu','gpu','storage','ram','os','brand'].some(k => String(pc[k] || '').trim() !== String(corrected[k] || '').trim());
     if (!changed) continue;
     // update local list for immediate UI feedback
     list[i] = corrected;
@@ -105,7 +119,7 @@ async function standardizeAndPersist(list) {
 function renderTable(list) {
   tableBody.innerHTML = '';
   if (!Array.isArray(list) || list.length === 0) {
-    tableBody.innerHTML = '<tr><td colspan="7" class="muted">Aucun PC</td></tr>';
+    tableBody.innerHTML = '<tr><td colspan="8" class="muted">Aucun PC</td></tr>';
     return;
   }
   const pairs = list.map((pc, i) => ({ pc, i }));
@@ -119,6 +133,7 @@ function renderTable(list) {
       <td><img src="icons/${getCPUImage(pc.cpu)}" alt="${pc.cpu}">${highlight(pc.cpu, tokens)}</td>
       <td><img src="icons/${getGPUImage(pc.gpu)}" alt="${pc.gpu}">${highlight(pc.gpu, tokens)}</td>
       <td><img src="icons/${getStorageImage(pc.storage)}" alt="${pc.storage}">${highlight(pc.storage, tokens)}</td>
+      <td><img src="icons/${getRAMImage(pc.ram)}" alt="${pc.ram}">${highlight(pc.ram, tokens)}</td>
       <td><img src="icons/${getOSImage(pc.os)}" alt="${pc.os}">${highlight(pc.os, tokens)}</td>
       <td><img src="icons/${getBrandImage(pc.brand)}" alt="${pc.brand}">${highlight(pc.brand, tokens)}</td>
       <td class="actions">
@@ -174,57 +189,63 @@ modalCancel.addEventListener('click', (e) => {
 modalSave.addEventListener('click', async (e) => {
   e.preventDefault();
   const formData = new FormData(pcForm);
-  const pc = {};
-  ['cpu', 'gpu', 'storage', 'os', 'brand'].forEach((k) => (pc[k] = (formData.get(k) || '').trim()));
-  if (!pc.cpu) {
+  const original = {};
+  ['cpu', 'gpu', 'storage', 'ram', 'os', 'brand'].forEach((k) => (original[k] = (formData.get(k) || '').trim()));
+  if (!original.cpu) {
     showNotification('Le champ CPU est requis', 'error');
     return;
   }
-  // Apply DetectAI corrections before sending
+
+  // Compute suggested corrections but do NOT persist them yet
+  const suggested = Object.assign({}, original);
   if (detectAI) {
     try {
-      pc.cpu = (detectAI.correctCPU(pc.cpu) || pc.cpu).trim();
-      pc.gpu = (detectAI.correctGPU(pc.gpu) || pc.gpu).trim();
-      pc.storage = (detectAI.correctStorage(pc.storage) || pc.storage).trim();
-      pc.os = (detectAI.correctOS(pc.os) || pc.os).trim();
-      pc.brand = (detectAI.correctBrandModel(pc.brand) || pc.brand).trim();
-    } catch (e) {
-      console.error('DetectAI correction error', e);
+      suggested.cpu = (detectAI.correctCPU(original.cpu) || original.cpu).trim();
+      suggested.gpu = (detectAI.correctGPU(original.gpu) || original.gpu).trim();
+      suggested.storage = (detectAI.correctStorage(original.storage) || original.storage).trim();
+      suggested.ram = (detectAI.correctRAM ? (detectAI.correctRAM(original.ram) || original.ram) : original.ram).trim();
+      suggested.os = (detectAI.correctOS(original.os) || original.os).trim();
+      suggested.brand = (detectAI.correctBrandModel(original.brand) || original.brand).trim();
+    } catch (err) {
+      console.error('DetectAI correction error', err);
     }
   }
-  if (!CSRF) {
-    showNotification('Jeton CSRF manquant. Rechargez la page.', 'error');
+
+  // Determine which fields actually changed according to DetectAI
+  const fields = ['cpu', 'gpu', 'storage', 'ram', 'os', 'brand'];
+  const changes = [];
+  fields.forEach((f) => {
+    const a = (original[f] || '').trim();
+    const b = (suggested[f] || '').trim();
+    if (a !== b) {
+      changes.push({ field: f, from: a, to: b });
+    }
+  });
+
+  // If there are proposed changes, show confirmation modal offering three choices
+  if (changes.length > 0) {
+    // store pending state
+    pendingOriginalPC = original;
+    pendingSuggestedPC = suggested;
+    pendingEditIndex = editIndex;
+
+    // hide the create modal and show corrections modal
+    hideModal();
+    if (correctionList) {
+      correctionList.innerHTML = '';
+      changes.forEach((c) => {
+        const row = document.createElement('div');
+        row.className = 'correction-row';
+        row.innerHTML = `<strong>${c.field.toUpperCase()}</strong>: <div style="margin-top:6px;">De: <em>${escapeHtml(c.from || '(vide)')}</em></div><div>Vers: <strong>${escapeHtml(c.to || '')}</strong></div>`;
+        correctionList.appendChild(row);
+      });
+    }
+    showCorrectionModal();
     return;
   }
-  try {
-    const opts = {
-      method: editIndex === null ? 'POST' : 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CSRF-Token': CSRF,
-        'X-Requested-With': 'XMLHttpRequest'
-      },
-      body: JSON.stringify(pc),
-      credentials: 'same-origin',
-    };
-    const url = editIndex === null ? 'api.php' : `api.php?index=${editIndex}`;
-    const res = await fetch(url, opts);
-    if (!res.ok) {
-      if (res.status === 401) {
-        showNotification('Non authentifié', 'error');
-        window.location = 'index.php';
-        return;
-      }
-      const txt = await res.text();
-      throw new Error(txt || 'Erreur serveur');
-    }
-    await res.json();
-    hideModal();
-    loadPCs();
-  } catch (err) {
-    console.error(err);
-    showNotification("Erreur lors de l'enregistrement", 'error');
-  }
+
+  // No changes => persist original value immediately
+  await sendPC(original, editIndex);
 });
 
 // délégation pour edit / delete
@@ -237,6 +258,7 @@ tableBody.addEventListener('click', (e) => {
     pcForm.cpu.value = pc.cpu || '';
     pcForm.gpu.value = pc.gpu || '';
     pcForm.storage.value = pc.storage || '';
+    pcForm.querySelector('[name="ram"]').value = pc.ram || '';
     pcForm.os.value = pc.os || '';
     pcForm.brand.value = pc.brand || '';
     updatePreviewsFromForm();
@@ -280,6 +302,102 @@ function hideModal() {
   pcForm.reset();
   updatePreviewsFromForm();
   document.body.classList.remove('no-scroll');
+}
+
+// Correction modal helpers
+function showCorrectionModal() {
+  if (!correctionModal) return;
+  correctionModal.classList.add('open');
+  correctionModal.setAttribute('aria-hidden', 'false');
+  document.body.classList.add('no-scroll');
+}
+
+function hideCorrectionModal() {
+  if (!correctionModal) return;
+  correctionModal.classList.remove('open');
+  correctionModal.setAttribute('aria-hidden', 'true');
+  document.body.classList.remove('no-scroll');
+}
+
+// Send PC to server (POST or PUT depending on idx)
+async function sendPC(pcObj, idx) {
+  if (!CSRF) {
+    showNotification('Jeton CSRF manquant. Rechargez la page.', 'error');
+    return;
+  }
+  try {
+    const opts = {
+      method: idx === null ? 'POST' : 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': CSRF,
+        'X-Requested-With': 'XMLHttpRequest'
+      },
+      body: JSON.stringify(pcObj),
+      credentials: 'same-origin',
+    };
+    const url = idx === null ? 'api.php' : `api.php?index=${idx}`;
+    const res = await fetch(url, opts);
+    if (!res.ok) {
+      if (res.status === 401) {
+        showNotification('Non authentifié', 'error');
+        window.location = 'index.php';
+        return;
+      }
+      const txt = await res.text();
+      throw new Error(txt || 'Erreur serveur');
+    }
+    await res.json();
+    // after success, refresh list
+    hideCorrectionModal();
+    hideModal();
+    loadPCs();
+  } catch (err) {
+    console.error(err);
+    showNotification("Erreur lors de l'enregistrement", 'error');
+  }
+}
+
+// Correction modal button handlers
+if (correctionApply) {
+  correctionApply.addEventListener('click', async (e) => {
+    e.preventDefault();
+    if (!pendingSuggestedPC) return;
+    await sendPC(pendingSuggestedPC, pendingEditIndex);
+    pendingSuggestedPC = pendingOriginalPC = null;
+    pendingEditIndex = null;
+  });
+}
+
+if (correctionKeep) {
+  correctionKeep.addEventListener('click', async (e) => {
+    e.preventDefault();
+    if (!pendingOriginalPC) return;
+    await sendPC(pendingOriginalPC, pendingEditIndex);
+    pendingSuggestedPC = pendingOriginalPC = null;
+    pendingEditIndex = null;
+  });
+}
+
+if (correctionEdit) {
+  correctionEdit.addEventListener('click', (e) => {
+    e.preventDefault();
+    if (!pendingOriginalPC) return;
+    const idx = pendingEditIndex;
+    // re-open the main form with original values so user can edit manually
+    hideCorrectionModal();
+    editIndex = idx;
+    pcForm.querySelector('[name="cpu"]').value = pendingOriginalPC.cpu || '';
+    pcForm.querySelector('[name="gpu"]').value = pendingOriginalPC.gpu || '';
+    pcForm.querySelector('[name="storage"]').value = pendingOriginalPC.storage || '';
+    pcForm.querySelector('[name="ram"]').value = pendingOriginalPC.ram || '';
+    pcForm.querySelector('[name="os"]').value = pendingOriginalPC.os || '';
+    pcForm.querySelector('[name="brand"]').value = pendingOriginalPC.brand || '';
+    pendingSuggestedPC = pendingOriginalPC = null;
+    pendingEditIndex = null;
+    updatePreviewsFromForm();
+    showModal();
+  });
 }
 
 // small preview pop animation helper
@@ -482,6 +600,7 @@ function updatePreviewsFromForm() {
   const cpu = (pcForm.querySelector('[name="cpu"]')?.value || '').trim();
   const gpu = (pcForm.querySelector('[name="gpu"]')?.value || '').trim();
   const storage = (pcForm.querySelector('[name="storage"]')?.value || '').trim();
+  const ram = (pcForm.querySelector('[name="ram"]')?.value || '').trim();
   const os = (pcForm.querySelector('[name="os"]')?.value || '').trim();
   const brand = (pcForm.querySelector('[name="brand"]')?.value || '').trim();
 
@@ -494,6 +613,12 @@ function updatePreviewsFromForm() {
   storagePreview.src = `icons/${getStorageImage(storage)}`;
   storageDetected.textContent = detectStorage(storage);
 
+  // RAM preview/detection
+  if (typeof ram !== 'undefined') {
+    ramPreview && (ramPreview.src = `icons/${getRAMImage(ram)}`);
+    ramDetected && (ramDetected.textContent = detectRAM(ram));
+  }
+
   osPreview.src = `icons/${getOSImage(os)}`;
   osDetected.textContent = detectOS(os);
 
@@ -504,9 +629,10 @@ function updatePreviewsFromForm() {
   animatePreview(cpuPreview);
   animatePreview(gpuPreview);
   animatePreview(storagePreview);
+  animatePreview(ramPreview);
   animatePreview(osPreview);
   animatePreview(brandPreview);
-  [cpuDetected, gpuDetected, storageDetected, osDetected, brandDetected].forEach((el) => {
+  [cpuDetected, gpuDetected, storageDetected, ramDetected, osDetected, brandDetected].forEach((el) => {
     if (!el) return;
     el.classList.add('pulse');
     setTimeout(() => el.classList.remove('pulse'), 260);
@@ -532,6 +658,7 @@ searchInput.addEventListener('input', () => {
       <td><img src="icons/${getCPUImage(pc.cpu)}" alt="${pc.cpu}">${escapeHtml(pc.cpu)}</td>
       <td><img src="icons/${getGPUImage(pc.gpu)}" alt="${pc.gpu}">${escapeHtml(pc.gpu)}</td>
       <td><img src="icons/${getStorageImage(pc.storage)}" alt="${pc.storage}">${escapeHtml(pc.storage)}</td>
+      <td><img src="icons/${getRAMImage(pc.ram)}" alt="${pc.ram}">${escapeHtml(pc.ram)}</td>
       <td><img src="icons/${getOSImage(pc.os)}" alt="${pc.os}">${escapeHtml(pc.os)}</td>
       <td><img src="icons/${getBrandImage(pc.brand)}" alt="${pc.brand}">${escapeHtml(pc.brand)}</td>
       <td class="actions">
@@ -546,7 +673,7 @@ searchInput.addEventListener('input', () => {
 });
 
 // input listeners pour mise à jour en direct
-['cpu','gpu','storage','os','brand'].forEach((name) => {
+['cpu','gpu','storage','ram','os','brand'].forEach((name) => {
   const input = pcForm.querySelector(`[name="${name}"]`);
   if (input) input.addEventListener('input', updatePreviewsFromForm);
 });
@@ -590,6 +717,27 @@ function detectStorage(s) {
   if (/HDD/i.test(su)) return 'HDD';
   if (/NVME|M\.2|SSD/i.test(su)) return 'SSD';
   return '';
+}
+
+function detectRAM(s) {
+  if (detectAI && typeof detectAI.detectRAM === 'function') return detectAI.detectRAM(s);
+  if (!s) return '';
+  const m = String(s).match(/(\d+(?:[\.,]\d+)?)\s*(tb|to|t|gb|g|go|mb|m|mo|kb|k|ko)\b/i);
+  let cap = '';
+  if (m) {
+    let num = m[1].replace(',', '.');
+    let unit = (m[2] || '').toLowerCase();
+    if (unit === 'to' || unit === 't' || unit === 'tb') unit = 'TB';
+    else if (unit === 'go' || unit === 'g' || unit === 'gb') unit = 'GB';
+    else if (unit === 'mo' || unit === 'm' || unit === 'mb') unit = 'MB';
+    else if (unit === 'ko' || unit === 'k' || unit === 'kb') unit = 'KB';
+    if (unit) {
+      if (num.indexOf('.') >= 0) num = parseFloat(num).toString(); else num = parseInt(num, 10).toString();
+      cap = num + unit;
+    }
+  }
+  // return only capacity (e.g. '16GB') — do not include DDR specifiers
+  return cap;
 }
 
 function detectOS(s) {
@@ -645,6 +793,12 @@ function getStorageImage(storage) {
   if (!storage) return 'none.png';
   const s = storage.toUpperCase();
   return (s.includes('HDD') ? 'hdd' : 'ssd') + '.png';
+}
+
+function getRAMImage(ram) {
+  if (detectAI && typeof detectAI.getRAMImage === 'function') return detectAI.getRAMImage(ram);
+  // no dedicated RAM icon available, fallback to none
+  return 'none.png';
 }
 
 function getOSImage(os) {

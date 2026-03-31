@@ -42,15 +42,36 @@
 
       // Candidate lists — extend as needed
       this.brands = [
-        'dell','asus','msi','gigabyte','samsung','lenovo','hp','acer','toshiba','apple','microsoft','google','amazon','razer','thermaltake','evga','corsair'
+        'dell','asus','msi','gigabyte','samsung','lenovo','hp','acer','toshiba','apple','microsoft','google','amazon','razer','thermaltake','evga','corsair',
+        'palit','zotac','pny','galax','gainward','inno3d','colorful','asrock','biostar','intel','amd'
       ];
 
       this.osList = [
-        'windows 11','windows 10','windows 8.1','windows 8','windows 7','windows xp','windows vista',
-        'ubuntu','debian','fedora','kali','arch','centos','mint'
+        'windows 11','windows 10','windows 8.1','windows 8','windows 7','windows xp','windows vista','windows server',
+        'ubuntu','debian','fedora','kali','arch','centos','mint','manjaro','alpine',
+        'macos ventura','macos monterey','macos big sur','macos catalina','macos mojave','macos high sierra',
+        'chromeos','android','ios'
       ];
 
       this.gpuMakers = ['nvidia','amd','intel'];
+
+      // Representative GPU candidates / families (fuzzy matching handles variants)
+      this.gpuCandidates = [
+        'Nvidia RTX 4090','Nvidia RTX 4080','Nvidia RTX 4070','Nvidia RTX 4060','Nvidia RTX 4050',
+        'Nvidia RTX 3090','Nvidia RTX 3080','Nvidia RTX 3070','Nvidia RTX 3060','Nvidia RTX 3050',
+        'Nvidia GTX 1660','Nvidia GTX 1650','Nvidia GTX 1080','Nvidia GTX 1070','Nvidia GTX 1060','Nvidia GTX 1050',
+        'Nvidia Titan','Nvidia Quadro',
+        'AMD Radeon RX 7900 XTX','AMD Radeon RX 7900 XT','AMD Radeon RX 7800','AMD Radeon RX 7700','AMD Radeon RX 7600',
+        'AMD Radeon RX 6900','AMD Radeon RX 6800','AMD Radeon RX 6700','AMD Radeon RX 6600','AMD Radeon RX 6500','AMD Radeon RX 580','AMD Vega',
+        'AMD Radeon Pro','AMD Radeon VII',
+        'Intel Arc A770','Intel Arc A750','Intel Arc A580','Intel Iris Xe','Intel UHD Graphics 770','Intel Iris Xe Max'
+      ];
+
+      // Representative CPU candidates
+      this.cpuCandidates = [
+        'Intel Core i3','Intel Core i5','Intel Core i7','Intel Core i9','Intel Pentium','Intel Celeron','Intel Xeon','Intel Atom',
+        'AMD Ryzen 3','AMD Ryzen 5','AMD Ryzen 7','AMD Ryzen 9','AMD Threadripper','AMD EPYC','AMD Athlon'
+      ];
 
       this.storageKeywords = ['ssd','hdd','nvme','m.2','m2'];
 
@@ -565,9 +586,77 @@
       const n = this.normalize(raw);
       if (!n) return '';
       if (this._corrections[n]) return this._corrections[n].toUpperCase();
+
+      // Try to parse a capacity token from the raw input (supports FR/EN units)
+      // Examples matched: '1tb', '1 to', '1.5To', '256go', '256 gb', '512gb', '512GB', '256go'
+      const capMatch = raw.match(/(\d+(?:[\.,]\d+)?)\s*(tb|to|t|gb|g|go|mb|m|mo|kb|k|ko)?/i);
+      let capStr = '';
+      if (capMatch) {
+        let num = capMatch[1].replace(',', '.');
+        let unit = (capMatch[2] || '').toLowerCase();
+        // normalize unit tokens to canonical suffix
+        if (unit === 'to' || unit === 't' || unit === 'tb') unit = 'TB';
+        else if (unit === 'go' || unit === 'g' || unit === 'gb') unit = 'GB';
+        else if (unit === 'mo' || unit === 'm' || unit === 'mb') unit = 'MB';
+        else if (unit === 'ko' || unit === 'k' || unit === 'kb') unit = 'KB';
+        else unit = '';
+
+        if (unit) {
+          // format number: remove trailing .0 when integer
+          if (num.indexOf('.') >= 0) {
+            num = parseFloat(num).toString();
+          } else {
+            num = parseInt(num, 10).toString();
+          }
+          capStr = num + unit;
+        }
+      }
+
+      // prefer explicit storage type (SSD/HDD) detection
       const st = this.detectStorage(raw);
-      if (st) return st.toUpperCase();
+      if (st) {
+        return (capStr ? (st.toUpperCase() + ' ' + capStr) : st.toUpperCase());
+      }
+
+      // if no explicit storage type but capacity exists, return capacity alone
+      if (capStr) return capStr;
       return '';
+    }
+
+    // ---------- RAM detection / normalization ----------
+    // Return detected RAM string like '16GB' (capacity only)
+    detectRAM(s) {
+      const raw = util.safe(s);
+      if (!raw) return '';
+      // capture number + unit (supports FR/EN units)
+      const m = raw.match(/(\d+(?:[\.,]\d+)?)\s*(tb|to|t|gb|g|go|mb|m|mo|kb|k|ko)\b/i);
+      let cap = '';
+      if (m) {
+        let num = m[1].replace(',', '.');
+        let unit = (m[2] || '').toLowerCase();
+        if (unit === 'to' || unit === 't' || unit === 'tb') unit = 'TB';
+        else if (unit === 'go' || unit === 'g' || unit === 'gb') unit = 'GB';
+        else if (unit === 'mo' || unit === 'm' || unit === 'mb') unit = 'MB';
+        else if (unit === 'ko' || unit === 'k' || unit === 'kb') unit = 'KB';
+        else unit = '';
+        if (unit) {
+          if (num.indexOf('.') >= 0) num = parseFloat(num).toString(); else num = parseInt(num, 10).toString();
+          cap = num + unit;
+        }
+      }
+      // Return only capacity (e.g. '16GB'); do not include DDR suffixes
+      return cap;
+    }
+
+    getRAMImage(s) {
+      const r = util.safe(this.detectRAM(s)).toLowerCase();
+      if (!r) return 'none.png';
+      return 'ram.png';
+    }
+
+    correctRAM(raw) {
+      const r = this.detectRAM(raw);
+      return r ? r : '';
     }
 
     // Explain decision (debugging)

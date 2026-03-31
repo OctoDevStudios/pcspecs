@@ -22,6 +22,19 @@ Interface web minimaliste pour gérer une liste de configs PC — propulsée par
 
 DetectAI transforme les saisies approximatives en labels propres, prêts à afficher des icônes et des informations précises.
 
+### Nouveautés — DetectAI encore plus intelligent
+
+DetectAI est désormais plus intelligent que jamais : il corrige des fautes incroyablement bruitées, normalise automatiquement les capacités (SSD/HDD, TB/GB), détecte et normalise la RAM (ex. `16Go` → `16GB`) — la sortie conserve uniquement la capacité, et reconnaît des centaines de modèles CPU/GPU/marques. Il propose des corrections interactives (Appliquer / Garder / Éditer) avant sauvegarde et apprend localement pour s'améliorer avec votre catalogue. Résultat : des saisies approximatives deviennent immédiatement des labels propres, des icônes pertinentes et des recherches instantanées — c'est rapide, robuste et prêt pour une utilisation sérieuse.
+
+- 🎯 Corrections orthographiques et phonétiques étendues (`nidia` → `NVIDIA`)
+- 🧾 Normalisation avancée des unités et capacités (`1to` → `1TB`, `256go` → `256GB`)
+- 🔋 Détection et normalisation de la RAM (`16Go` → `16GB`) — conserve uniquement la capacité
+- 🛠️ Suggestions interactives UX (Appliquer / Garder / Éditer) pour plus de contrôle avant persistance
+- 🧠 Base de candidats CPU/GPU/marques élargie pour une couverture bien supérieure des modèles
+- ⚡ Performances en temps réel dans le navigateur et apprentissage local via `localStorage`
+
+Essayez-le dans l'interface : saisissez une entrée approximative et constatez la transformation.
+
 ### Capacités
 
 - ✅ Correction orthographique et phonétique (`micrrosoft` → `Microsoft`)
@@ -141,3 +154,9 @@ window.__DetectAI_Corrections.runSamples(30);
 
 - Stockage fichier uniquement → **pas conçu pour une forte concurrence**
 - Pas de chiffrement des backups intégré
+
+---
+
+## **Changelog**
+
+Voir le fichier `CHANGELOG.md` pour le snapshot de la journée (2026-03-31).
