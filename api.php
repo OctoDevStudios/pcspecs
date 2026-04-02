@@ -1,11 +1,13 @@
 <?php
 session_start();
 
-// Security headers
+// Minimal security headers for API responses
 header('Content-Type: application/json; charset=utf-8');
 header('X-Content-Type-Options: nosniff');
 header('X-Frame-Options: DENY');
 header('Referrer-Policy: no-referrer');
+
+// simple CSP for API responses only (page content is unaffected)
 header("Content-Security-Policy: default-src 'self'; img-src 'self' data:; script-src 'self'; style-src 'self' 'unsafe-inline';");
 
 // settings
@@ -24,7 +26,6 @@ if (file_exists($settingsFile)) {
     if (is_array($s)) $settings = array_merge($settings, $s);
 }
 
-// helper sanitize
 function sanitize($s, $max = 200) {
     $s = strip_tags((string)$s);
     $s = preg_replace('/[\x00-\x1F\x7F]/u', '', $s);
@@ -33,15 +34,58 @@ function sanitize($s, $max = 200) {
     return $s;
 }
 
-function readData() {
-    global $jsonFile;
-    $content = @file_get_contents($jsonFile);
-    if ($content === false) return [];
-    $data = json_decode($content, true);
-    return is_array($data) ? $data : [];
+// SQLite: data storage
+$jsonFile = 'pcs.json';
+$dbFile = 'data/pcspecs.sqlite';
+try {
+    if (!is_dir(dirname($dbFile))) @mkdir(dirname($dbFile), 0750, true);
+    $pdo = new PDO('sqlite:' . $dbFile);
+    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    $pdo->exec("CREATE TABLE IF NOT EXISTS pcs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        cpu TEXT,
+        gpu TEXT,
+        storage TEXT,
+        ram TEXT,
+        os TEXT,
+        brand TEXT,
+        created_at INTEGER
+    )");
+    // migrate from pcs.json if table empty
+    $count = (int)$pdo->query('SELECT COUNT(*) FROM pcs')->fetchColumn();
+    if ($count === 0 && file_exists($jsonFile)) {
+        $cont = @file_get_contents($jsonFile);
+        $arr = json_decode($cont, true);
+        if (is_array($arr) && count($arr) > 0) {
+            $ins = $pdo->prepare('INSERT INTO pcs (cpu,gpu,storage,ram,os,brand,created_at) VALUES (?,?,?,?,?,?,?)');
+            $pdo->beginTransaction();
+            foreach ($arr as $r) {
+                $ins->execute([
+                    isset($r['cpu']) ? $r['cpu'] : '',
+                    isset($r['gpu']) ? $r['gpu'] : '',
+                    isset($r['storage']) ? $r['storage'] : '',
+                    isset($r['ram']) ? $r['ram'] : '',
+                    isset($r['os']) ? $r['os'] : '',
+                    isset($r['brand']) ? $r['brand'] : '',
+                    time()
+                ]);
+            }
+            $pdo->commit();
+        }
+    }
+} catch (Exception $e) {
+    http_response_code(500);
+    echo json_encode(['status' => 'error', 'message' => 'Failed to open database']);
+    exit;
 }
 
-// logger
+function readData() {
+    global $pdo;
+    $stmt = $pdo->query('SELECT id,cpu,gpu,storage,ram,os,brand FROM pcs ORDER BY id');
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    return $rows ?: [];
+}
+
 function log_event($action, $details = []) {
     global $settings;
     if (empty($settings['enable_logs'])) return;
@@ -65,13 +109,7 @@ function log_event($action, $details = []) {
     @file_put_contents($logFile, $line, FILE_APPEND | LOCK_EX);
 }
 
-// path to data file
-$jsonFile = 'pcs.json';
-if (!file_exists($jsonFile)) {
-    file_put_contents($jsonFile, json_encode([]), LOCK_EX);
-}
-
-// authentication check
+// require authenticated session for API
 if (empty($_SESSION['authenticated'])) {
     http_response_code(401);
     echo json_encode(['status' => 'error', 'message' => 'Unauthorized']);
@@ -102,6 +140,27 @@ if (in_array($method, ['POST', 'PUT', 'DELETE'])) {
 
 switch ($method) {
     case 'GET':
+        // get by id
+        if (isset($_GET['id'])) {
+            $id = intval($_GET['id']);
+            $stmt = $pdo->prepare('SELECT id,cpu,gpu,storage,ram,os,brand FROM pcs WHERE id = ? LIMIT 1');
+            $stmt->execute([$id]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!$row) { http_response_code(404); echo json_encode(['status'=>'error','message'=>'Not found']); exit; }
+            echo json_encode($row);
+            break;
+        }
+        // get by array index (legacy client uses indexes)
+        if (isset($_GET['index'])) {
+            $index = max(0, intval($_GET['index']));
+            $stmt = $pdo->prepare('SELECT id,cpu,gpu,storage,ram,os,brand FROM pcs ORDER BY id LIMIT 1 OFFSET ?');
+            $stmt->bindValue(1, $index, PDO::PARAM_INT);
+            $stmt->execute();
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!$row) { http_response_code(404); echo json_encode(['status'=>'error','message'=>'Index not found']); exit; }
+            echo json_encode($row);
+            break;
+        }
         echo json_encode(readData());
         break;
 
@@ -132,16 +191,18 @@ switch ($method) {
             'os' => sanitize($newPC['os'] ?? '', 64),
             'brand' => sanitize($newPC['brand'] ?? '', 128),
         ];
-        $data = readData();
-        $data[] = $pc;
-        if (!file_put_contents($jsonFile, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX)) {
+        try {
+            $stmt = $pdo->prepare('INSERT INTO pcs (cpu,gpu,storage,ram,os,brand,created_at) VALUES (?,?,?,?,?,?,?)');
+            $stmt->execute([$pc['cpu'],$pc['gpu'],$pc['storage'],$pc['ram'],$pc['os'],$pc['brand'], time()]);
+            $last = (int)$pdo->lastInsertId();
+            $_SESSION['last_write'] = microtime(true);
+            log_event('create', ['id' => $last, 'pc' => $pc]);
+            echo json_encode(['status' => 'success', 'message' => 'PC ajouté', 'id' => $last]);
+        } catch (Exception $e) {
             http_response_code(500);
             echo json_encode(['status' => 'error', 'message' => 'Write failed']);
             exit;
         }
-        $_SESSION['last_write'] = microtime(true);
-        log_event('create', ['index' => count($data)-1, 'pc' => $pc]);
-        echo json_encode(['status' => 'success', 'message' => 'PC ajouté']);
         break;
 
     case 'DELETE':
@@ -151,22 +212,26 @@ switch ($method) {
             echo json_encode(['status' => 'error', 'message' => 'Index non fourni']);
             exit;
         }
-        $data = readData();
-        if (!isset($data[$index])) {
-            http_response_code(404);
-            echo json_encode(['status' => 'error', 'message' => 'Index non trouvé']);
-            exit;
-        }
-        $old = $data[$index];
-        array_splice($data, $index, 1);
-        if (!file_put_contents($jsonFile, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX)) {
+        $map = $pdo->prepare('SELECT id FROM pcs ORDER BY id LIMIT 1 OFFSET ?');
+        $map->bindValue(1, $index, PDO::PARAM_INT);
+        $map->execute();
+        $row = $map->fetch(PDO::FETCH_ASSOC);
+        if (!$row) { http_response_code(404); echo json_encode(['status'=>'error','message'=>'Index non trouvé']); exit; }
+        $id = (int)$row['id'];
+        $oldStmt = $pdo->prepare('SELECT id,cpu,gpu,storage,ram,os,brand FROM pcs WHERE id = ?');
+        $oldStmt->execute([$id]);
+        $old = $oldStmt->fetch(PDO::FETCH_ASSOC);
+        try {
+            $del = $pdo->prepare('DELETE FROM pcs WHERE id = ?');
+            $del->execute([$id]);
+            $_SESSION['last_write'] = microtime(true);
+            log_event('delete', ['id' => $id, 'old' => $old]);
+            echo json_encode(['status' => 'success', 'message' => 'PC supprimé']);
+        } catch (Exception $e) {
             http_response_code(500);
             echo json_encode(['status' => 'error', 'message' => 'Write failed']);
             exit;
         }
-        $_SESSION['last_write'] = microtime(true);
-        log_event('delete', ['index' => $index, 'old' => $old]);
-        echo json_encode(['status' => 'success', 'message' => 'PC supprimé']);
         break;
 
     case 'PUT':
@@ -189,14 +254,16 @@ switch ($method) {
             echo json_encode(['status' => 'error', 'message' => 'Données invalides']);
             exit;
         }
-        $data = readData();
-        if (!isset($data[$index])) {
-            http_response_code(404);
-            echo json_encode(['status' => 'error', 'message' => 'Index non trouvé']);
-            exit;
-        }
-        $old = $data[$index];
-        $data[$index] = [
+        $map = $pdo->prepare('SELECT id FROM pcs ORDER BY id LIMIT 1 OFFSET ?');
+        $map->bindValue(1, $index, PDO::PARAM_INT);
+        $map->execute();
+        $row = $map->fetch(PDO::FETCH_ASSOC);
+        if (!$row) { http_response_code(404); echo json_encode(['status'=>'error','message'=>'Index non trouvé']); exit; }
+        $id = (int)$row['id'];
+        $oldStmt = $pdo->prepare('SELECT id,cpu,gpu,storage,ram,os,brand FROM pcs WHERE id = ?');
+        $oldStmt->execute([$id]);
+        $old = $oldStmt->fetch(PDO::FETCH_ASSOC);
+        $newRow = [
             'cpu' => sanitize($updatedPC['cpu'], 128),
             'gpu' => sanitize($updatedPC['gpu'] ?? '', 128),
             'storage' => sanitize($updatedPC['storage'] ?? '', 64),
@@ -204,14 +271,17 @@ switch ($method) {
             'os' => sanitize($updatedPC['os'] ?? '', 64),
             'brand' => sanitize($updatedPC['brand'] ?? '', 128),
         ];
-        if (!file_put_contents($jsonFile, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX)) {
+        try {
+            $upd = $pdo->prepare('UPDATE pcs SET cpu=?,gpu=?,storage=?,ram=?,os=?,brand=? WHERE id=?');
+            $upd->execute([$newRow['cpu'],$newRow['gpu'],$newRow['storage'],$newRow['ram'],$newRow['os'],$newRow['brand'],$id]);
+            $_SESSION['last_write'] = microtime(true);
+            log_event('update', ['id' => $id, 'old' => $old, 'new' => $newRow]);
+            echo json_encode(['status' => 'success', 'message' => 'PC modifié']);
+        } catch (Exception $e) {
             http_response_code(500);
             echo json_encode(['status' => 'error', 'message' => 'Write failed']);
             exit;
         }
-        $_SESSION['last_write'] = microtime(true);
-        log_event('update', ['index' => $index, 'old' => $old, 'new' => $data[$index]]);
-        echo json_encode(['status' => 'success', 'message' => 'PC modifié']);
         break;
 
     default:

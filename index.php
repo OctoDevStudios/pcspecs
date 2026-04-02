@@ -414,6 +414,16 @@ endif;
     <div class="spinner"></div>
   </div>
 
+  <script>
+    (function(){
+      try {
+        var isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || (window.matchMedia && window.matchMedia('(max-width:700px)').matches);
+        if (isMobile && window.location.pathname.indexOf('mobile.php') === -1) {
+          window.location = 'mobile.php';
+        }
+      } catch (e) {}
+    })();
+  </script>
   <script src="detectai.js"></script>
   <script src="script.js"></script>
 </body>

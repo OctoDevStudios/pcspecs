@@ -1,0 +1,32 @@
+:root{--primary:#6200ee;--on-primary:#ffffff;--surface:#ffffff;--bg:#f6f7fb;--muted:#6b7280}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;font-family:Roboto, 'Helvetica Neue', Arial, sans-serif;background:linear-gradient(180deg,#f8fafc,#eef2ff)}
+.appbar{height:56px;background:var(--primary);color:var(--on-primary);display:flex;align-items:center;justify-content:space-between;padding:0 12px;font-weight:600;box-shadow:0 2px 6px rgba(0,0,0,0.12)}
+.app-title{font-size:18px}
+.app-actions{display:flex;gap:8px}
+.content{padding:12px}
+.mobile-card{max-width:520px;margin:28px auto;background:white;border-radius:12px;padding:18px;box-shadow:0 8px 30px rgba(2,6,23,0.06);text-align:center}
+.login-form{display:flex;flex-direction:column;gap:12px;margin-top:12px}
+.login-form input{padding:12px;border-radius:10px;border:1px solid #e6e9ef;font-size:16px}
+.btn{appearance:none;border:0;padding:10px 12px;border-radius:10px;background:transparent;color:var(--primary);cursor:pointer;font-weight:600}
+.btn.small{padding:6px 8px;border-radius:8px;background:rgba(255,255,255,0.08);color:var(--on-primary)}
+.btn.primary{background:var(--primary);color:var(--on-primary)}
+.muted{color:var(--muted);font-size:13px}
+.scanner{display:flex;flex-direction:column;gap:8px;align-items:center}
+.qr-reader{width:100%;max-width:420px;height:320px;background:#000;border-radius:8px;overflow:hidden;display:flex;align-items:center;justify-content:center;color:#fff}
+.scan-result{padding:8px 12px;border-radius:8px;background:rgba(0,0,0,0.04);width:100%;max-width:520px;text-align:center}
+.scanner-actions{display:flex;gap:8px;margin-top:8px}
+.pc-detail{margin-top:12px;background:white;border-radius:8px;padding:12px;box-shadow:0 6px 20px rgba(2,6,23,0.06)}
+.pc-list{margin-top:12px}
+.pc-item{padding:12px;border-radius:8px;background:white;margin-bottom:8px;display:flex;gap:10px;align-items:center;box-shadow:0 6px 18px rgba(0,0,0,0.04)}
+.pc-item img{width:40px;height:40px}
+.pc-item .meta{font-size:14px}
+.hidden{display:none}
+.error{background:#fee2e2;color:#b91c1c;padding:8px;border-radius:8px}
+
+/* Make buttons look like FAB when appropriate */
+.fab{position:fixed;right:16px;bottom:16px;width:56px;height:56px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:var(--primary);color:var(--on-primary);box-shadow:0 8px 24px rgba(0,0,0,0.18);border:0}
+
+@media (min-width:800px){
+  .content{max-width:800px;margin:0 auto}
+}
