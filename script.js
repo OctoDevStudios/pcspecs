@@ -129,7 +129,12 @@ function renderTable(list) {
   pairs.forEach(({ pc, i }, displayIndex) => {
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td>${displayIndex + 1}</td>
+      <td>
+        <div class="row-index">
+          <span class="index-number">${displayIndex + 1}</span>
+          <div class="qr-container" id="qr-${i}" data-id="${pc.id || ''}" data-index="${i}" title="QR"></div>
+        </div>
+      </td>
       <td><img src="icons/${getCPUImage(pc.cpu)}" alt="${pc.cpu}">${highlight(pc.cpu, tokens)}</td>
       <td><img src="icons/${getGPUImage(pc.gpu)}" alt="${pc.gpu}">${highlight(pc.gpu, tokens)}</td>
       <td><img src="icons/${getStorageImage(pc.storage)}" alt="${pc.storage}">${highlight(pc.storage, tokens)}</td>
@@ -143,6 +148,17 @@ function renderTable(list) {
     `;
     tr.classList.add('enter');
     tableBody.appendChild(tr);
+    // generate QR code for the row (prefer id, fallback to index)
+    try {
+      (function(rowIndex, pcData) {
+        const el = document.getElementById('qr-' + rowIndex);
+        if (el && typeof QRCode === 'function') {
+          const payload = (pcData && pcData.id) ? ('id:' + pcData.id) : ('index:' + rowIndex);
+          el.innerHTML = '';
+          new QRCode(el, { text: payload, width: 64, height: 64, colorDark: '#000000', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.H });
+        }
+      })(i, pc);
+    } catch (e) { /* ignore QR errors */ }
     tr.addEventListener('animationend', () => tr.classList.remove('enter'));
   });
 }
@@ -654,7 +670,12 @@ searchInput.addEventListener('input', () => {
   filtered.forEach(({ pc, i }, displayIndex) => {
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td>${displayIndex + 1}</td>
+      <td>
+        <div class="row-index">
+          <span class="index-number">${displayIndex + 1}</span>
+          <div class="qr-container" id="qr-${i}" data-id="${pc.id || ''}" data-index="${i}" title="QR"></div>
+        </div>
+      </td>
       <td><img src="icons/${getCPUImage(pc.cpu)}" alt="${pc.cpu}">${escapeHtml(pc.cpu)}</td>
       <td><img src="icons/${getGPUImage(pc.gpu)}" alt="${pc.gpu}">${escapeHtml(pc.gpu)}</td>
       <td><img src="icons/${getStorageImage(pc.storage)}" alt="${pc.storage}">${escapeHtml(pc.storage)}</td>
@@ -668,6 +689,17 @@ searchInput.addEventListener('input', () => {
     `;
     tr.classList.add('enter');
     tableBody.appendChild(tr);
+    // generate QR for filtered row
+    try {
+      (function(rowIndex, pcData) {
+        const el = document.getElementById('qr-' + rowIndex);
+        if (el && typeof QRCode === 'function') {
+          const payload = (pcData && pcData.id) ? ('id:' + pcData.id) : ('index:' + rowIndex);
+          el.innerHTML = '';
+          new QRCode(el, { text: payload, width: 64, height: 64, colorDark: '#000000', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.H });
+        }
+      })(i, pc);
+    } catch (e) { /* ignore */ }
     tr.addEventListener('animationend', () => tr.classList.remove('enter'));
   });
 });

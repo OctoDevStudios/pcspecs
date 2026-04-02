@@ -148,3 +148,8 @@ img{width:36px;height:auto;vertical-align:middle;margin-right:8px}
 .loading-overlay[hidden]{display:none}
 .spinner{width:42px;height:42px;border-radius:50%;border:4px solid rgba(255,255,255,0.12);border-top-color:#fff;animation:spin 1s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
+
+/* QR next to index */
+.row-index{display:flex;align-items:center;gap:8px}
+.row-index .index-number{font-weight:700;min-width:40px;text-align:center}
+.qr-container{width:64px;height:64px;display:inline-block}

@@ -13,7 +13,7 @@ html,body{height:100%;margin:0;font-family:Roboto, 'Helvetica Neue', Arial, sans
 .btn.primary{background:var(--primary);color:var(--on-primary)}
 .muted{color:var(--muted);font-size:13px}
 .scanner{display:flex;flex-direction:column;gap:8px;align-items:center}
-.qr-reader{width:100%;max-width:420px;height:320px;background:#000;border-radius:8px;overflow:hidden;display:flex;align-items:center;justify-content:center;color:#fff}
+.qr-reader{width:min(90vw,400px);height:min(90vw,400px);background:#000;border-radius:12px;overflow:hidden;display:flex;align-items:center;justify-content:center;color:#fff;position:relative}
 .scan-result{padding:8px 12px;border-radius:8px;background:rgba(0,0,0,0.04);width:100%;max-width:520px;text-align:center}
 .scanner-actions{display:flex;gap:8px;margin-top:8px}
 .pc-detail{margin-top:12px;background:white;border-radius:8px;padding:12px;box-shadow:0 6px 20px rgba(2,6,23,0.06)}
@@ -23,6 +23,8 @@ html,body{height:100%;margin:0;font-family:Roboto, 'Helvetica Neue', Arial, sans
 .pc-item .meta{font-size:14px}
 .hidden{display:none}
 .error{background:#fee2e2;color:#b91c1c;padding:8px;border-radius:8px}
+.btn:disabled{opacity:.38;cursor:default}
+.btn.active{background:#f59e0b;color:#fff}
 
 /* Make buttons look like FAB when appropriate */
 .fab{position:fixed;right:16px;bottom:16px;width:56px;height:56px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:var(--primary);color:var(--on-primary);box-shadow:0 8px 24px rgba(0,0,0,0.18);border:0}
